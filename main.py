@@ -1,7 +1,6 @@
-from src import CFTT
+import flet as ft
+
+from src.main import main
 
 
-cftt = CFTT()
-
-
-cftt.send()
+ft.run(main=main)

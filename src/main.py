@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 
 import flet as ft
 
-from sock import DiscoveryChannel, CFTT
+from src.sock import DiscoveryChannel, CFTT
 
 
 channel = DiscoveryChannel()
