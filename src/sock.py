@@ -15,8 +15,11 @@ class DiscoveryChannel:
 		An instance of the `DiscoveryChannel` class
 
 		Args:
-			broadcast_ip (str | None): T
-			broadcast_port (str | None): T
+			broadcast_ip (str | None): The IPv4 broadcast address used to send
+				discovery packets. Defaults to "255.255.255.255" (limited broadcast,
+				reaches all hosts on the local subnet).
+			broadcast_port (str | None): The UDP port used for broadcast discovery messages.
+				Defaults to 5001
 		"""
 
 		self.BROADCAST_IP = broadcast_ip or "255.255.255.255"
@@ -310,9 +313,23 @@ class CFTT:
 
 
 	def stop(self):
+		"""A shortcut on DiscoveryChannel().stop() method"""
 		self.channel.stop()
 
 	def _prep_header(self, filename: str, size: int) -> bytes:
+		"""
+		Prepares the header by combining the filename and
+		size of the data to be sent. It also replaces \n
+		characters fromt the filename with an empty string
+
+		Args:
+			filename (str): The name of the data or file being sent
+			size (int): The size of the file in bytes
+
+		Returns:
+			bytes: A header byte comprising of the filename and the
+				size of the file separated by a newline character.
+		"""
 		if "\n" in filename:
 			filename = filename.replace("\n", "")
 
@@ -322,6 +339,7 @@ class CFTT:
 
 
 	def _recv_exact(self, sock: socket.socket, n: int):
+		"""Receives the exact amount of bytes from a socket"""
 		buf = bytearray()
 
 		while len(buf) < n:
@@ -335,11 +353,25 @@ class CFTT:
 		return bytes(buf)
 
 	def _parse_header(self, header: str, delimiter: str = "\n") -> tuple[str, int]:
+		"""
+		Returns a tuple of filename and size from a header by delimeter sepratation
+		"""
 		_header = header.split(delimiter, 1)
 
 		return _header[0], int(_header[1])
 
 	def _recv_file(self, conn: socket.socket, size: int, filename: str, dest):
+		"""
+		Similar to _recv_exact method but this time writes bytes to disk directly.
+
+		Args:
+			conn (socket.socket): The socket obj
+			size (int): The total size of the of bytes to read from the socket
+			filename (str): The name of the file. Data writing to disk will be saved
+				against this name
+			dest (_type_): The destination path to where the data will be saved.
+
+		"""
 
 		# The filename is rechecked to ensure that the sender didn't tamper with
 		# it from its side.
