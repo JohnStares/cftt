@@ -1,69 +1,52 @@
-# Ui app
+# CFTT
 
-## Run the app
+**CFTT** stands for **Custom File Transfer Tool**. The name is a little
+unusual; it was a practical choice for a personal project, not a polished
+product name.
 
-### uv
+CFTT is a small app for sending files directly between devices on the same
+local network. It is being built for my own use and as a project to work on.
+It is still under development and has not been packaged for general use.
 
-Run as a desktop app:
+## What it can do
+
+- Select and send one or more files to another device running CFTT.
+- Find devices on the local network by their device name, or connect using a
+  PIN.
+- Receive files and choose where they are saved.
+- Show transfer progress and retry files that did not send successfully.
+- Run as a Flet app, with desktop and mobile platforms as development targets.
+
+Both devices need to be on a network that allows them to communicate with each
+other. Network or firewall restrictions may prevent discovery or transfers.
+
+## Development setup
+
+The project requires Python 3.10 or later. Using [uv](https://docs.astral.sh/uv/)
+is the easiest way to install the project and its development dependencies:
+
+```bash
+uv sync --group dev
+```
+
+Run the app in desktop development mode:
 
 ```bash
 uv run flet run
 ```
 
-Run as a web app:
+The Flet app source is in [`src/`](src/) in [`src/main.py`](src/main.py) file, with its entry point at
+[`main.py`](main.py). The file-transfer and device-discovery code is in
+[`src/sock.py`](src/sock.py).
 
-```bash
-uv run flet run --web
-```
+## Project status
 
-For more details on running the app, refer to the [Getting Started Guide](https://flet.dev/docs/).
+This is a work in progress for personal use. It is **not currently bundled as
+an installer or app package**, and it is not being presented as a production
+file-transfer product. Platform packaging, device compatibility, and network
+behavior still need testing on the systems where it may eventually be used.
 
-## Build the app
+## License
 
-### Android
-
-```bash
-flet build apk -v
-```
-
-For more details on building and signing `.apk` or `.aab`, refer to the [Android Packaging Guide](https://flet.dev/docs/publish/android/).
-
-### iOS
-
-```bash
-flet build ipa -v
-```
-
-For more details on building and signing `.ipa`, refer to the [iOS Packaging Guide](https://flet.dev/docs/publish/ios/).
-
-### macOS
-
-```bash
-flet build macos -v
-```
-
-For more details on building macOS package, refer to the [macOS Packaging Guide](https://flet.dev/docs/publish/macos/).
-
-### Linux
-
-```bash
-flet build linux -v
-```
-
-For more details on building Linux package, refer to the [Linux Packaging Guide](https://flet.dev/docs/publish/linux/).
-
-### Windows
-
-```bash
-flet build windows -v
-```
-
-For more details on building Windows package, refer to the [Windows Packaging Guide](https://flet.dev/docs/publish/windows/).
-
-### Web
-
-```bash
-flet build web -v
-```
-
-For more details on building Web app, refer to the [Web Packaging Guide](https://flet.dev/docs/publish/web/).
+No license has been specified yet. Until one is added, assume that all rights
+are reserved.
