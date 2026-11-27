@@ -1,11 +1,11 @@
 [project]
 name = "cftt"
 version = "0.1.0"
-description = ""
+description = "CFTT is a small app for sending files directly between devices on the same local network."
 readme = "README.md"
 requires-python = ">=3.10"
 authors = [
-    { name = "Flet developer", email = "you@example.com" }
+    { name = "John Stares", email = "wisdom8achor24@gmail.com" }
 ]
 dependencies = [
     "flet>=1.1.3"
