@@ -44,7 +44,7 @@ class DiscoveryChannel:
 
 		self._thread.start()
 
-	def listen(self, pin: str | None = None):
+	def listen(self, pin: str | None = None, ldevices: Callable[[tuple[str, int, str]], Any] | None = None):
 		"""
 		The sending device needs a way to get the IP and PORT of the device it
 		needs to send data to over the network. The receiving device needs to
@@ -54,7 +54,11 @@ class DiscoveryChannel:
 			ADDR (tuple[str, int] | None): The IP and Port of the broadcasting device
 				or None if it didn't find any.
 		"""
-		_pin = None
+		if pin is None and ldevices is None:
+			raise RuntimeError("Either pin or a ldevices should be provided")
+
+		# Holds the list of devices found
+		devices_found = set()
 		with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
 			sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 			sock.bind(("", self.BROADCAST_PORT))
@@ -81,20 +85,16 @@ class DiscoveryChannel:
 						continue
 
 					if pin is not None:
-						id, _pin, ip, port = data.split("|")
-					else:
-						id, ip, port = data.split("|")
+						addr_info = self._listen_via_pin(sock, data, pin, addr)
 
-					if id != self.DISCOVERY_UNIQ_ID:
-						continue
+						if not addr_info:
+							continue
 
-					if pin is not None and _pin is not None and pin != _pin:
-						continue
+						return addr_info
 
-					ack_msg = f"{self.DISCOVERY_UNIQ_ID}|Ack".encode()
+					if ldevices:
+						self._listen(data, devices_found, ldevices)
 
-					sock.sendto(ack_msg, addr)
-					return (ip, int(port))
 
 				except (UnicodeDecodeError, ValueError):
 					continue
@@ -110,45 +110,54 @@ class DiscoveryChannel:
 		A helper method that handles the actual broadcasting.
 		"""
 		HOST = self._get_local_ip()
+		HOST_NAME = socket.gethostname()
 
 		with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
 			sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
 
-			msg = f"{self.DISCOVERY_UNIQ_ID}|{pin}|{HOST}|{self.PORT}" if pin is not None else \
-				f"{self.DISCOVERY_UNIQ_ID}|{HOST}|{self.PORT}"
+			msg = f"{self.DISCOVERY_UNIQ_ID}|{pin}|{HOST}|{self.PORT}|{HOST_NAME}" if pin is not None else \
+				f"{self.DISCOVERY_UNIQ_ID}|{HOST}|{self.PORT}|{HOST_NAME}"
 
-			for _ in range(10):
+			for i in range(10):
 				if self._event.is_set():
 					return
 
 				sock.sendto(msg.encode("utf-8"), self.BROADCAST_ADDR)
 
-				ack_deadline = time.monotonic() + 2.0
+				if pin:
+					ack_deadline = time.monotonic() + 2.0
 
-				while time.monotonic() < ack_deadline:
-					remaining = ack_deadline - time.monotonic()
+					while time.monotonic() < ack_deadline:
+						remaining = ack_deadline - time.monotonic()
 
-					if remaining <= 0:
-						break
+						if remaining <= 0:
+							break
 
-					sock.settimeout(remaining)
+						sock.settimeout(remaining)
 
-					try:
-						data, _ = sock.recvfrom(1024)
+						try:
+							data, _ = sock.recvfrom(1024)
 
-						data = data.decode()
+							data = data.decode()
 
-						if self.DISCOVERY_UNIQ_ID in data:
-							parts = data.split("|")
+							if self.DISCOVERY_UNIQ_ID in data:
+								parts = data.split("|")
 
-							if self.DISCOVERY_UNIQ_ID != parts[0] or "Ack" != parts[1]:
-								raise RuntimeError("Wrong Ack")
+								if self.DISCOVERY_UNIQ_ID != parts[0] or "Ack" != parts[1]:
+									raise RuntimeError("Wrong Ack")
 
-							self._event.set()
-							return
+								self._event.set()
+								return
 
-					except socket.timeout:
-						break
+						except socket.timeout:
+							break
+				else:
+					if i == 9:
+						self._event.set() # On the 9 iteration call set to free the thread for cleaning
+
+					# Wait for 2s before looping again.
+					# Makes the total broadcast last for 20s
+					self._event.wait(2.0)
 
 	def _stop_broadcasting(self):
 		"""
@@ -172,6 +181,44 @@ class DiscoveryChannel:
 				return sock.getsockname()[0]
 			except OSError:
 				return "127.0.0.1"
+
+	def _listen_via_pin(self, sock: socket.socket, data: str, pin: str, addr: socket._RetAddress) -> tuple[str, int, str] | bool:
+		"""
+		Listens on a broadcast via a pin. If the pin matches, it sends an ack back to the
+		broadcaster to stop broadcasting
+
+		Returns:
+			tuple[str, int, str] | bool: A tuple of ip, port and dname that the pin matches or False
+		"""
+		id, _pin, ip, port, name = data.split("|")
+
+		if id != self.DISCOVERY_UNIQ_ID:
+			return False
+
+		if pin is not None and _pin is not None and pin != _pin:
+			return False
+
+		ack_msg = f"{self.DISCOVERY_UNIQ_ID}|Ack".encode()
+
+		sock.sendto(ack_msg, addr)
+		return (ip, int(port), name)
+
+	def _listen(self, data: str, devices_found: set[str], ldevices: Callable[[tuple[str, int, str]], Any]) -> None:
+		"""
+		Listens on a broadcast and adds found devices to a set and also sends the found
+		device to the UI. This enables the UI to choose which device to connect to based on the name
+		"""
+		id, ip, port, name = data.split("|")
+		
+		if id != self.DISCOVERY_UNIQ_ID:
+			return
+
+		if name not in devices_found:
+			devices_found.add(name)
+
+			device = (ip, int(port), name)
+			ldevices(device)
+
 
 
 
