@@ -256,6 +256,8 @@ class CFTT:
 		on_progress: Callable[[int, int], Any] | None = kwargs.get("on_progress")
 		# Returns failed files to the UI so retry can only send files that failed
 		on_failed_files: Callable[[list[str]], Any] | None = kwargs.get("on_failed_files")
+		# Notifies the UI that it has started sending out files
+		on_start: Callable[[]] = kwargs["on_start"]
 
 		failed_files: list[str] = []
 
@@ -264,6 +266,7 @@ class CFTT:
 
 			total_files = len(files_path)
 			sent = 0
+			on_start()
 
 			sock.sendall(total_files.to_bytes(4, "big"))
 
@@ -312,6 +315,8 @@ class CFTT:
 		dest: str = kwargs["dest"]
 		# Updates the UI on the progress of files that are received
 		on_progress: Callable[[int, int], Any] | None = kwargs.get("on_progress")
+		# Notifies the UI that it has started receiving files
+		on_start: Callable[[]] = kwargs["on_start"]
 
 		self.channel.broadcast()
 
@@ -326,6 +331,7 @@ class CFTT:
 				conn, _ = sock.accept() # Blocking
 
 				with conn:
+					on_start()
 					files_len = int.from_bytes(self._recv_exact(conn, 4), "big")
 
 					for _ in range(files_len):
