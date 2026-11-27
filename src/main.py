@@ -348,13 +348,19 @@ async def main(page: ft.Page):
             body.controls = list(controls)
             page.update()
 
+        scan = {"token": None, "done": None, "devices": {}}
+
         async def retry(e=None):
+            done = scan["done"]
+            if done and not done.is_set():
+                render(ft.ProgressRing(), text="Finishing device scan...")
+                await asyncio.to_thread(done.wait)
             state.task = asyncio.create_task(run())
 
         retry_btn = ft.Button("Retry", icon=ft.Icons.REFRESH, on_click=retry)
         home_btn = ft.Button("Done", icon=ft.Icons.HOME, on_click=nav("/"))
 
-        async def send_to(ip, port, files):
+        async def send_to(ip, port, files, device_name=None):
             sent_count = 0
             reported_failed_files = []
             progress_active = True
@@ -366,6 +372,16 @@ async def main(page: ft.Page):
                 body.controls = [ft.ProgressBar(value=sent / total if total else 0)]
                 page.update()
 
+            async def update_started():
+                if not progress_active:
+                    return
+                status.value = "Sending files..."
+                body.controls = [ft.ProgressRing()]
+                page.update()
+
+            def on_start():
+                page.run_task(update_started)
+
             def on_progress(sent, total):
                 nonlocal sent_count
                 sent_count = sent
@@ -374,13 +390,15 @@ async def main(page: ft.Page):
             def on_failed_files(failed_files):
                 reported_failed_files[:] = failed_files
 
-            render(ft.ProgressRing(), text=f"Sending {len(files)} file(s) to {ip}...")
+            target = device_name or ip
+            render(ft.ProgressRing(), text=f"Connecting to {target}...")
             try:
                 await asyncio.to_thread(
                     lambda: sock.send(
                         ip=ip,
                         port=port,
                         files=files,
+                        on_start=on_start,
                         on_progress=on_progress,
                         on_failed_files=on_failed_files,
                     )
@@ -407,6 +425,11 @@ async def main(page: ft.Page):
         async def run():
             pin = state.send_pin
             files = list(state.failed_files or state.files)
+            token = object()
+            scan["token"] = token
+            scan["devices"] = {}
+            scan_done = threading.Event()
+            scan["done"] = scan_done
             spinner = None
             if pin:
                 render(ft.ProgressRing(), text="Looking for the device with that PIN...")
@@ -414,46 +437,90 @@ async def main(page: ft.Page):
                 render(radar, text="Scanning for nearby devices...")
                 spinner = asyncio.create_task(spin())
 
+            def choose_device(device):
+                async def chosen(e):
+                    if scan["token"] is not token:
+                        return
+                    scan["token"] = None
+                    if spinner:
+                        spinner.cancel()
+                    ip, port, name = device
+                    await send_to(ip, port, files, name)
+
+                return chosen
+
+            async def render_devices(include_retry):
+                devices = list(scan["devices"].values())
+                controls: list[ft.Control] = [radar]
+                for device in devices:
+                    _, _, name = device
+                    controls.append(
+                        ft.Card(
+                            content=ft.ListTile(
+                                leading=ft.Icon(ft.Icons.LAPTOP),
+                                title=ft.Text(name),
+                                subtitle=ft.Text("Tap to send"),
+                                on_click=choose_device(device),
+                            ),
+                        )
+                    )
+                if include_retry:
+                    controls.append(ft.TextButton("Scan again", on_click=retry))
+                render(
+                    *controls,
+                    text="Select a device" if devices else "Scanning for nearby devices...",
+                )
+
+            async def show_device(device):
+                if scan["token"] is not token or state.route != "/send/search":
+                    return
+                _, _, name = device
+                if name in scan["devices"]:
+                    return
+                scan["devices"][name] = device
+                add_blip()
+                await render_devices(include_retry=scan_done.is_set())
+
+            def on_device_found(device):
+                page.run_task(show_device, device)
+
             error = None
             result = None
+
+            def listen():
+                try:
+                    if pin:
+                        return channel.listen(pin=pin)
+                    return channel.listen(ldevices=on_device_found)
+                finally:
+                    scan_done.set()
+
             try:
-                kwargs = {"pin": pin} if pin else {}
-                result = await asyncio.to_thread(lambda: channel.listen(**kwargs))
+                result = await asyncio.to_thread(listen)
             except Exception as ex:
                 error = ex
             finally:
                 if spinner:
                     spinner.cancel()
 
+            if scan["token"] is not token:
+                return
             if error:
                 render(ft.Text(str(error), color=ft.Colors.RED_600), retry_btn, text="Search failed")
                 return
-            if result is None:
+            if pin:
+                if not isinstance(result, tuple):
+                    render(ft.Icon(ft.Icons.SEARCH_OFF, size=64), retry_btn, text="No device found")
+                    return
+                ip, port, name = result
+                scan["token"] = None
+                await send_to(ip, port, files, name)
+                return
+
+            if not scan["devices"]:
                 render(ft.Icon(ft.Icons.SEARCH_OFF, size=64), retry_btn, text="No device found")
                 return
-
-            ip, port = result
-            if pin:
-                await send_to(ip, port, files)
-                return
-
-            async def chosen(e):
-                await send_to(ip, port, files)
-
-            add_blip()
-            render(
-                radar,
-                ft.Card(
-                    content=ft.ListTile(
-                        leading=ft.Icon(ft.Icons.LAPTOP),
-                        title=ft.Text(ip),
-                        subtitle=ft.Text(f"Port {port} - tap to send"),
-                        on_click=chosen,
-                    ),
-                ),
-                ft.TextButton("Scan again", on_click=retry),
-                text="Device found",
-            )
+            await render_devices(include_retry=True)
 
         state.on_enter = run
         return ft.View(
@@ -495,6 +562,7 @@ async def main(page: ft.Page):
             s.discovery = discovery
             state.receive = s
             progress_active = True
+            receive_started = threading.Event()
             kwargs = {"pin": pin} if pin else {}
 
             def do_broadcast():
@@ -519,6 +587,24 @@ async def main(page: ft.Page):
                 ]
                 page.update()
 
+            async def update_started():
+                if (
+                    not progress_active
+                    or state.receive is not s
+                    or state.route != "/receive/session"
+                ):
+                    return
+                status.value = "Connected — receiving files..."
+                body.controls = [
+                    ft.ProgressRing(),
+                    ft.Text(f"Saving to: {dest}", size=12, text_align=ft.TextAlign.CENTER),
+                ]
+                page.update()
+
+            def on_start():
+                receive_started.set()
+                page.run_task(update_started)
+
             def on_progress(received, total):
                 s.received_files = received
                 s.total_files = total
@@ -526,7 +612,11 @@ async def main(page: ft.Page):
 
             def do_receive():
                 try:
-                    sock.receive(dest=dest, on_progress=on_progress)
+                    sock.receive(
+                        dest=dest,
+                        on_start=on_start,
+                        on_progress=on_progress,
+                    )
                 except Exception as ex:
                     s.receive_error = ex
                 finally:
@@ -543,6 +633,7 @@ async def main(page: ft.Page):
             deadline = asyncio.get_running_loop().time() + RECEIVE_TIMEOUT
             while (
                 not s.receive_done.is_set()
+                and not receive_started.is_set()
                 and asyncio.get_running_loop().time() < deadline
                 and s.broadcast_error is None
             ):
